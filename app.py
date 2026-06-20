@@ -125,7 +125,7 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
             "-crf", "22", "-preset", "fast", "-y",
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg lỗi: {result.stderr[-500:]}")
 
