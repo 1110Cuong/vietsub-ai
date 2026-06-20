@@ -506,11 +506,12 @@
 
   async function start() {
     const file = document.getElementById('vfile').files[0];
-    const gkey = document.getElementById('gkey').value.trim();
-    const akey = document.getElementById('akey').value.trim();
+    const keysHidden = document.getElementById('keysCard') && document.getElementById('keysCard').style.display === 'none';
+    const gkey = keysHidden ? '' : document.getElementById('gkey').value.trim();
+    const akey = keysHidden ? '' : document.getElementById('akey').value.trim();
     if (!file) return showToast('Chọn video trước đã!');
-    if (!gkey) return showToast('Nhập Groq API Key đi!');
-    if (!akey) return showToast('Nhập Anthropic API Key đi!');
+    if (!keysHidden && !gkey) return showToast('Nhập Groq API Key đi!');
+    if (!keysHidden && !akey) return showToast('Nhập Anthropic API Key đi!');
 
     document.getElementById('startBtn').disabled = true;
     const fd = new FormData();
