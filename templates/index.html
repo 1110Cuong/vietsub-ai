@@ -361,7 +361,8 @@
     </div>
 
     <!-- keys -->
-    <div class="gcard">
+    <div id="keysNote" style="display:none;text-align:center;font-size:13px;color:var(--green);padding:10px 0 4px;">&#128273; API keys da duoc cai dat tren server</div>
+    <div class="gcard" id="keysCard">
       <div class="clabel">API Keys</div>
       <div class="ig">
         <div class="ilabel">
@@ -458,6 +459,19 @@
 
 <script>
   let jobId = null, poll = null;
+
+  // Check if server has API keys configured
+  async function checkConfig() {
+    try {
+      const r = await fetch('/config');
+      const d = await r.json();
+      if (d.has_groq && d.has_claude) {
+        document.getElementById('keysCard').style.display = 'none';
+        document.getElementById('keysNote').style.display = 'block';
+      }
+    } catch(_) {}
+  }
+  checkConfig();
 
   function onFile(inp) {
     const f = inp.files[0]; if (!f) return;
