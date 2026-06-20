@@ -67,7 +67,7 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
         output_path = os.path.join(job_dir, "output.mp4")
 
         # Step 1: Transcribe with Groq Whisper
-        set_status(job_id, "transcribe", 10, "Đang nhận diện giọng nói...")
+        set_status(job_id, "transcribe", 10, "Dang nhan dien giong noi...")
         groq_client = Groq(api_key=groq_key)
         with open(video_path, "rb") as f:
             transcription = groq_client.audio.transcriptions.create(
@@ -79,10 +79,10 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
             )
 
         segments = parse_segments(transcription)
-        set_status(job_id, "transcribe", 30, f"Nhận diện xong {len(segments)} đoạn")
+        set_status(job_id, "transcribe", 30, f"Nhan dien xong {len(segments)} doan")
 
         # Step 2: Translate with Claude
-        set_status(job_id, "translate", 35, "Đang dịch sang tiếng Việt...")
+        set_status(job_id, "translate", 35, "Dang dich sang tieng Viet...")
         claude_client = anthropic.Anthropic(api_key=claude_key)
         translated = []
         batch_size = 30
@@ -111,14 +111,14 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
                 translated.append({"start": seg["start"], "end": seg["end"], "text": vi})
 
             progress = 35 + int((idx + 1) / len(batches) * 35)
-            set_status(job_id, "translate", progress, f"Đã dịch {len(translated)}/{len(segments)} đoạn")
+            set_status(job_id, "translate", progress, f"Da dich {len(translated)}/{len(segments)} doan")
 
         # Step 3: Write SRT
-        set_status(job_id, "srt", 72, "Đang tạo file phụ đề...")
+        set_status(job_id, "srt", 72, "Dang tao file phu de...")
         write_srt(translated, srt_path)
 
         # Step 4: Burn subtitles
-        set_status(job_id, "burn", 78, "Đang nhúng phụ đề vào video...")
+        set_status(job_id, "burn", 78, "Dang nhung phu de vao video...")
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
         style = "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Bold=1,Outline=2,MarginV=20"
         cmd = [
@@ -128,13 +128,15 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
             "-crf", "22", "-preset", "fast", "-y",
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8'
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', env=env)
         if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg lỗi: {result.stderr[-500:]}")
+            raise RuntimeError(f"FFmpeg loi: {result.stderr[-500:]}")
 
         JOBS[job_id].update({
             "step": "done", "progress": 100,
-            "message": "Hoàn thành!", "output": output_path
+            "message": "Hoan thanh!", "output": output_path
         })
 
     except Exception as e:
@@ -154,19 +156,19 @@ def index():
 @app.route("/upload", methods=["POST"])
 def upload():
     if "video" not in request.files:
-        return jsonify({"error": "Không có file video"}), 400
+        return jsonify({"error": "Khong co file video"}), 400
     file      = request.files["video"]
     groq_key  = request.form.get("groq_key", "").strip()
     claude_key = request.form.get("claude_key", "").strip()
     if not groq_key or not claude_key:
-        return jsonify({"error": "Thiếu API key"}), 400
+        return jsonify({"error": "Thieu API key"}), 400
 
     job_id     = str(uuid.uuid4())
     ext        = Path(file.filename).suffix or ".mp4"
     video_path = os.path.join(UPLOAD_FOLDER, f"{job_id}{ext}")
     file.save(video_path)
 
-    JOBS[job_id] = {"step": "queued", "progress": 0, "message": "Đang chờ xử lý..."}
+    JOBS[job_id] = {"step": "queued", "progress": 0, "message": "Dang cho xu ly..."}
     threading.Thread(target=run_pipeline, args=(job_id, video_path, groq_key, claude_key), daemon=True).start()
     return jsonify({"job_id": job_id})
 
@@ -183,7 +185,7 @@ def status(job_id):
 def download(job_id):
     job = JOBS.get(job_id)
     if not job or job.get("step") != "done":
-        return jsonify({"error": "Chưa xong"}), 404
+        return jsonify({"error": "Chua xong"}), 404
     return send_file(job["output"], as_attachment=True, download_name="video_vietsub.mp4")
 
 
