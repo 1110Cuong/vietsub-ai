@@ -14,6 +14,9 @@ UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
 JOBS = {}
 
+# 500MB upload limit
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
