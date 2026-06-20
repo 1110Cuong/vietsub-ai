@@ -7,19 +7,16 @@ from pathlib import Path
 from groq import Groq
 import anthropic
 import subprocess
-import shutil
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
-JOBS = {}  # job_id -> status dict
+JOBS = {}
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def format_time(seconds):
     h = int(seconds // 3600)
@@ -39,13 +36,31 @@ def set_status(job_id, step, progress, message):
     JOBS[job_id].update({"step": step, "progress": progress, "message": message})
 
 
-# ── Pipeline ─────────────────────────────────────────────────────────────────
+def parse_segments(transcription):
+    """Handle both dict and object formats from Groq API."""
+    raw = transcription.segments or []
+    segments = []
+    for s in raw:
+        if isinstance(s, dict):
+            segments.append({
+                "start": s.get("start", 0),
+                "end":   s.get("end", 0),
+                "text":  s.get("text", "").strip(),
+            })
+        else:
+            segments.append({
+                "start": s.start,
+                "end":   s.end,
+                "text":  s.text.strip(),
+            })
+    return segments
+
 
 def run_pipeline(job_id, video_path, groq_key, claude_key):
     try:
         job_dir = os.path.join(OUTPUT_FOLDER, job_id)
         os.makedirs(job_dir, exist_ok=True)
-        srt_path = os.path.join(job_dir, "subtitles.srt")
+        srt_path    = os.path.join(job_dir, "subtitles.srt")
         output_path = os.path.join(job_dir, "output.mp4")
 
         # Step 1: Transcribe with Groq Whisper
@@ -59,10 +74,8 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
             )
-        segments = [
-            {"start": s.start, "end": s.end, "text": s.text.strip()}
-            for s in transcription.segments
-        ]
+
+        segments = parse_segments(transcription)
         set_status(job_id, "transcribe", 30, f"Nhận diện xong {len(segments)} đoạn")
 
         # Step 2: Translate with Claude
@@ -74,18 +87,23 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
 
         for idx, batch in enumerate(batches):
             texts = [s["text"] for s in batch]
-            prompt = f"""Dịch các phụ đề sau từ tiếng Trung sang tiếng Việt. Trả về ONLY JSON array, không giải thích:
-{json.dumps(texts, ensure_ascii=False)}"""
+            prompt = (
+                "Dịch các phụ đề sau từ tiếng Trung sang tiếng Việt. "
+                "Trả về ONLY JSON array, không giải thích:\n"
+                + json.dumps(texts, ensure_ascii=False)
+            )
             resp = claude_client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=2048,
                 messages=[{"role": "user", "content": prompt}]
             )
-            raw = resp.content[0].text.strip().strip("```json").strip("```").strip()
+            raw = resp.content[0].text.strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
             try:
                 vi_texts = json.loads(raw)
             except Exception:
                 vi_texts = texts
+
             for seg, vi in zip(batch, vi_texts):
                 translated.append({"start": seg["start"], "end": seg["end"], "text": vi})
 
@@ -96,14 +114,15 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
         set_status(job_id, "srt", 72, "Đang tạo file phụ đề...")
         write_srt(translated, srt_path)
 
-        # Step 4: Burn subtitles with FFmpeg
+        # Step 4: Burn subtitles
         set_status(job_id, "burn", 78, "Đang nhúng phụ đề vào video...")
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
         style = "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Bold=1,Outline=2,MarginV=20"
         cmd = [
             "ffmpeg", "-i", video_path,
             "-vf", f"subtitles='{srt_escaped}':force_style='{style}'",
-            "-c:a", "copy", "-c:v", "libx264", "-crf", "22", "-preset", "fast", "-y",
+            "-c:a", "copy", "-c:v", "libx264",
+            "-crf", "22", "-preset", "fast", "-y",
             output_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -118,14 +137,11 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
     except Exception as e:
         JOBS[job_id].update({"step": "error", "progress": 0, "message": str(e)})
     finally:
-        # Clean up upload
         try:
             os.remove(video_path)
         except Exception:
             pass
 
-
-# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -136,21 +152,19 @@ def index():
 def upload():
     if "video" not in request.files:
         return jsonify({"error": "Không có file video"}), 400
-    file = request.files["video"]
-    groq_key = request.form.get("groq_key", "").strip()
+    file      = request.files["video"]
+    groq_key  = request.form.get("groq_key", "").strip()
     claude_key = request.form.get("claude_key", "").strip()
     if not groq_key or not claude_key:
         return jsonify({"error": "Thiếu API key"}), 400
 
-    job_id = str(uuid.uuid4())
-    ext = Path(file.filename).suffix or ".mp4"
+    job_id     = str(uuid.uuid4())
+    ext        = Path(file.filename).suffix or ".mp4"
     video_path = os.path.join(UPLOAD_FOLDER, f"{job_id}{ext}")
     file.save(video_path)
 
     JOBS[job_id] = {"step": "queued", "progress": 0, "message": "Đang chờ xử lý..."}
-    t = threading.Thread(target=run_pipeline, args=(job_id, video_path, groq_key, claude_key), daemon=True)
-    t.start()
-
+    threading.Thread(target=run_pipeline, args=(job_id, video_path, groq_key, claude_key), daemon=True).start()
     return jsonify({"job_id": job_id})
 
 
