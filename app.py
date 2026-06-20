@@ -76,7 +76,7 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
         groq_client = Groq(api_key=groq_key)
         with open(video_path, "rb") as f:
             transcription = groq_client.audio.transcriptions.create(
-                file=(os.path.basename(video_path), f),
+                file=("audio.mp4", f),
                 model="whisper-large-v3",
                 language="zh",
                 response_format="verbose_json",
@@ -181,20 +181,27 @@ def run_pipeline(job_id, video_path, groq_key, claude_key):
 def index():
     return render_template("index.html")
 
+@app.route("/config")
+def config():
+    return jsonify({
+        "has_groq":   bool(os.environ.get("GROQ_API_KEY")),
+        "has_claude": bool(os.environ.get("ANTHROPIC_API_KEY")),
+    })
+
 
 @app.route("/upload", methods=["POST"])
 def upload():
     if "video" not in request.files:
         return jsonify({"error": "No video file"}), 400
     file       = request.files["video"]
-    groq_key   = request.form.get("groq_key", "").strip()
-    claude_key = request.form.get("claude_key", "").strip()
+    groq_key   = request.form.get("groq_key", "").strip() or os.environ.get("GROQ_API_KEY", "")
+    claude_key = request.form.get("claude_key", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "")
     if not groq_key or not claude_key:
         return jsonify({"error": "Missing API keys"}), 400
 
     job_id     = str(uuid.uuid4())
-    ext        = Path(file.filename).suffix or ".mp4"
-    video_path = os.path.join(UPLOAD_FOLDER, f"{job_id}{ext}")
+    # Always use .mp4 extension — ignore original filename to avoid encoding issues
+    video_path = os.path.join(UPLOAD_FOLDER, f"{job_id}.mp4")
     file.save(video_path)
 
     JOBS[job_id] = {"step": "queued", "progress": 0, "message": "Queued..."}
