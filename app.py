@@ -18,6 +18,16 @@ if sys.stdout.encoding != "utf-8":
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB
+app.config["JSON_AS_ASCII"] = False
+
+@app.before_request
+def fix_encoding():
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "outputs"
@@ -200,8 +210,10 @@ def upload():
         return jsonify({"error": "Missing API keys"}), 400
 
     job_id     = str(uuid.uuid4())
-    # Always use .mp4 extension — ignore original filename to avoid encoding issues
     video_path = os.path.join(UPLOAD_FOLDER, f"{job_id}.mp4")
+
+    # Save with safe filename — never use original filename
+    file.filename = f"{job_id}.mp4"
     file.save(video_path)
 
     JOBS[job_id] = {"step": "queued", "progress": 0, "message": "Queued..."}
